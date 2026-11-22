@@ -1,0 +1,79 @@
+name: Build Mashhad iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ios.yml"
+      - "ios/**"
+      - "lib/**"
+      - "test/**"
+      - "pubspec.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mashhad-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      FLUTTER_VERSION: "3.47.2"
+      FLUTTER_REVISION: d3b14c876900e553bc736ca19295fc09e3853e8e
+      FLUTTER_SUPPRESS_ANALYTICS: "true"
+    steps:
+      - name: Check out Mashhad
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Flutter
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" \
+            https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          test "$(git -C "$RUNNER_TEMP/flutter" rev-parse HEAD)" = "$FLUTTER_REVISION"
+          printf '%s\n' "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          xcodebuild -version
+
+      - name: Check the project
+        run: |
+          flutter --version
+          flutter pub get
+          flutter analyze --no-pub
+          flutter test --no-pub
+
+      - name: Build the iPhone release
+        run: flutter build ios --release --no-codesign --no-pub
+
+      - name: Package and verify the IPA
+        run: |
+          app="$GITHUB_WORKSPACE/build/ios/iphoneos/Runner.app"
+          stage="$(mktemp -d "$RUNNER_TEMP/mashhad.XXXXXX")"
+          output="$GITHUB_WORKSPACE/artifacts/Mashhad-iOS-unsigned.ipa"
+          test -f "$app/Info.plist"
+          test -x "$app/Runner"
+          lipo -verify_arch arm64 "$app/Runner"
+          mkdir -p "$stage/Payload" "$(dirname "$output")"
+          ditto "$app" "$stage/Payload/Runner.app"
+          (
+            cd "$stage"
+            zip -qry "$output" Payload
+          )
+          unzip -tq "$output"
+          unzip -Z -1 "$output" | grep -x 'Payload/Runner.app/Runner'
+          shasum -a 256 "$output" | awk '{ print $1 "  Mashhad-iOS-unsigned.ipa" }' \
+            > "$GITHUB_WORKSPACE/artifacts/Mashhad-iOS-unsigned.sha256"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: Mashhad-iOS-unsigned
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
