@@ -58,7 +58,7 @@ jobs:
           output="$GITHUB_WORKSPACE/artifacts/Mashhad-iOS-unsigned.ipa"
           test -f "$app/Info.plist"
           test -x "$app/Runner"
-          lipo -verify_arch arm64 "$app/Runner"
+          lipo "$app/Runner" -verify_arch arm64
           mkdir -p "$stage/Payload" "$(dirname "$output")"
           ditto "$app" "$stage/Payload/Runner.app"
           (
